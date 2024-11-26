@@ -1,146 +1,113 @@
 provider "aws" {
-  region = "us-east-1" # Change this to your desired AWS region
+  region = "us-east-1"
 }
 
-# Create a VPC
-resource "aws_vpc" "my_vpc" {
-  cidr_block = "10.0.0.0/16"
-
+#VPC
+resource "aws_vpc" "main" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_support   = true
+  enable_dns_hostnames = true
   tags = {
-    Name = "my-vpc"
+    Name = "eks-vpc"
   }
 }
 
-# Create Public Subnet
-resource "aws_subnet" "public_subnet" {
-  vpc_id                  = aws_vpc.my_vpc.id
-  cidr_block              = "10.0.1.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[0]
+# Subnets
+resource "aws_subnet" "public" {
+  count                   = 2
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = cidrsubnet(aws_vpc.main.cidr_block, 8, count.index)
   map_public_ip_on_launch = true
-
+  availability_zone       = element(data.aws_availability_zones.available.names, count.index)
   tags = {
-    Name = "public-subnet"
+    Name = "eks-public-subnet-${count.index + 1}"
   }
 }
 
-# Create Private Subnet
-resource "aws_subnet" "private_subnet" {
-  vpc_id            = aws_vpc.my_vpc.id
-  cidr_block        = "10.0.2.0/24"
-  availability_zone = data.aws_availability_zones.available.names[0]
-
-  tags = {
-    Name = "private-subnet"
-  }
-}
-
+# Availability Zones
+data "aws_availability_zones" "available" {}
 
 # Internet Gateway
 resource "aws_internet_gateway" "igw" {
-  vpc_id = aws_vpc.my_vpc.id
-
+  vpc_id = aws_vpc.main.id
   tags = {
-    Name = "basic-igw"
+    Name = "eks-igw"
   }
 }
 
-# Public Route Table
-resource "aws_route_table" "public_route_table" {
-  vpc_id = aws_vpc.my_vpc.id
-
+# Route Table for Public Subnets
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
   route {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.igw.id
   }
-
   tags = {
-    Name = "public-route-table"
+    Name = "eks-public-route-table"
   }
 }
 
-# Associate Subnet with Public Route Table
-resource "aws_route_table_association" "public_assoc" {
-  subnet_id      = aws_subnet.public_subnet.id
-  route_table_id = aws_route_table.public_route_table.id
+# Associate Subnets
+resource "aws_route_table_association" "public" {
+  count          = length(aws_subnet.public)
+  subnet_id      = aws_subnet.public[count.index].id
+  route_table_id = aws_route_table.public.id
 }
 
-# Data for Availability Zones
-data "aws_availability_zones" "available" {}
+# IAM Role for EKS
+resource "aws_iam_role" "eks_role" {
+  name = "eks-squad7-role"
 
-
-module "eks" {
-  source          = "terraform-aws-modules/eks/aws"
-  version         = "~> 18.0"
-  cluster_name    = "basic-eks-cluster"
-  cluster_version = "1.27"
-  vpc_id          = aws_vpc.my_vpc.id
-  subnets         = [aws_subnet.public_subnet.id, aws_subnet.private_subnet.id]
-
-  node_groups = {
-    eks_nodes = {
-      desired_capacity = 1
-      max_capacity     = 2
-      min_capacity     = 1
-      instance_type    = "t3.micro"
-    }
-  }
-
-  tags = {
-    Environment = "dev"
-  }
-}
-# ECR Repository
-resource "aws_ecr_repository" "basic_ecr" {
-  name = "basic-ecr-repository"
-
-  tags = {
-    Environment = "dev"
-  }
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action    = "sts:AssumeRole"
+        Effect    = "Allow"
+        Principal = {
+          Service = "eks.amazonaws.com"
+        }
+      }
+    ]
+  })
 }
 
-# S3 Bucket for Terraform State
-resource "aws_s3_bucket" "terraform_state" {
-  bucket = "my-terraform-state-bucket" # Replace with a unique bucket name
+# IAM Policy Attachments for EKS Role
+resource "aws_iam_role_policy_attachment" "eks_role_attachment" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+  role       = aws_iam_role.eks_role.name
+}
 
-  versioning {
-    enabled = true
-  }
+# EKS Cluster
+resource "aws_eks_cluster" "main" {
+  name     = "eks-cluster"
+  role_arn = aws_iam_role.eks_role.arn
 
-  lifecycle {
-    prevent_destroy = true
+  vpc_config {
+    subnet_ids = aws_subnet.public[*].id
   }
 
   tags = {
-    Name        = "Terraform State Bucket"
-    Environment = "dev"
+    Name = "eks-cluster"
   }
 }
 
-# DynamoDB Table for Locking
-resource "aws_dynamodb_table" "terraform_lock" {
-  name         = "terraform-lock"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "LockID"
 
-  attribute {
-    name = "LockID"
-    type = "S"
-  }
-
+resource "aws_ecr_repository" "repo" {
+  name = "my-ecr-repo"
   tags = {
-    Name        = "Terraform Lock Table"
-    Environment = "dev"
+    Name = "my-ecr-repo"
   }
 }
 
-# Terraform Backend Configuration
-terraform {
-  backend "s3" {
-    bucket         = "terraformstate133"
-    key            = "terraform/terraform.tfstate" # Path within the bucket
-    region         = "us-east-1"                         # Same region as your bucket
-    dynamodb_table = aws_dynamodb_table.terraform_lock.name
-    encrypt        = true
-  }
+output "vpc_id" {
+  value = aws_vpc.main.id
 }
 
+output "eks_cluster_name" {
+  value = aws_eks_cluster.main.name
+}
+
+output "ecr_repository_url" {
+  value = aws_ecr_repository.repo.repository_url
+}

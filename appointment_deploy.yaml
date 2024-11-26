@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: appointmentdeployment
+  labels:
+    app: my-appointment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-appointment
+  template:
+    metadata:
+      labels:
+        app: my-appointment
+    spec:
+      containers:
+      - name: my-app-container
+        image: 539935451710.dkr.ecr.us-east-1.amazonaws.com/my-ecr-repo:appointment
+        ports:
+        - containerPort: 3000
+        env:
+        - name: APP_ENV
+          value: "dev"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "250m"
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
+      imagePullSecrets:
+      - name: ecr-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app-service
+spec:
+  selector:
+    app: my-appointment
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000  # The container's port
+  type: LoadBalancer  # Expose the service as a LoadBalancer

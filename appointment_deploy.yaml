@@ -42,5 +42,5 @@ spec:
   ports:
     - protocol: TCP
       port: 3000
-      targetPort: 3000  # The container's port
-  type: LoadBalancer  # Expose the service as a LoadBalancer
+      targetPort: 3000 
+  type: LoadBalancer 

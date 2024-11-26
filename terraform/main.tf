@@ -136,8 +136,8 @@ resource "aws_dynamodb_table" "terraform_lock" {
 # Terraform Backend Configuration
 terraform {
   backend "s3" {
-    bucket         = aws_s3_bucket.terraform_state.id
-    key            = "terraform/state/terraform.tfstate" # Path within the bucket
+    bucket         = "terraformstate133"
+    key            = "terraform/terraform.tfstate" # Path within the bucket
     region         = "us-east-1"                         # Same region as your bucket
     dynamodb_table = aws_dynamodb_table.terraform_lock.name
     encrypt        = true
